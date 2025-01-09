@@ -3,12 +3,9 @@ from openai import OpenAI
 import os
 from tqdm import tqdm
 import pandas as pd
-model_bas_url={
-     "deepseek-chat":"https://api.deepseek.com",
-     "gemini-1.5-flash":"https://generativelanguage.googleapis.com/v1beta"
-}
+from pathlib import Path
 
-#sk-e3768301d1284486972552587cdac86f
+model_base_url={}
 
 language="MOROCCAN Arabic"
 SYSTEM_PROMPT = {
@@ -29,10 +26,17 @@ SYSTEM_PROMPT = {
             - Must communicate exclusively in {language}"""
         }
 
+def add_model(model_name,base_url,api_key):
+    model_base_url[model_name]=base_url
+    model_quest.choices=list(model_base_url.keys())
+    os.environ[model_name]=api_key
+    return gr.Dropdown(label="Questioner Model",choices=list(model_base_url.keys())),gr.Dropdown(label="Answerer Model",choices=list(model_base_url.keys()))
+
+
 def model_init(model):
     try:
         api_key=os.environ.get(model)
-        base_url=model_bas_url[model]
+        base_url=model_base_url[model]
         client = OpenAI(api_key=api_key, base_url=base_url)
         return client
     except Exception as e:
@@ -89,10 +93,8 @@ def save_conversation(conversation):
     for i in range(0,len(conversation)):
         conv_flat[conversation[i]["role"]].append(conversation[i]["content"])
     df=pd.DataFrame(conv_flat)
-    #print(df.head())
     df.to_csv("data.csv")
-
-#conversation_history = []
+    return Path("data.csv").name
 
 def user_input(context,model_a,model_b,num_rounds,conversation_history):
     conversation_history.clear()
@@ -113,28 +115,36 @@ def user_input(context,model_a,model_b,num_rounds,conversation_history):
             conversation_history.append(
                 {"role":"assistant","content":answer},
             )
-            
-    return conversation_history
+    file_path=save_conversation(conversation_history)
+    
+    return conversation_history,gr.DownloadButton(label="Save Conversation",value=file_path,visible=True)
 
 with gr.Blocks() as demo:
     gr.Markdown("""
-                <h1 style="text-align: center;">Debate Data Generator 🤖</h1>
+                <h1 style="text-align: center;">Mohadata: Debate Data Generator 🤖</h1>
+
                 This tool generates a debate-style conversation between two AI models based on a given **context**. It simulates a question-answer dialogue, where one model acts as the questioner and the other as the answerer. The conversation is generated iteratively, with each model responding to the previous message from the other model.
 
                 To use this tool:
+                * First, add information about the models you want to use by clicking the "+" button and filling in the required details.
                 * simply enter the **context** of the debate in the provided text box.
                 * select the models you want to use for the **questioner** and **answerer**.
                 * specify the **number of rounds** you want the conversation to last.
                 * click the **"Submit"** button to generate the conversation.
+                * download the conversation by clicking the **"Download Conversation"** button.
 
                 The conversation will be displayed in the chatbot window, with the questioner's messages on the right and the answerer's messages on the left. This tool can be useful for generating debate-style conversations on a given topic, and can help in understanding different perspectives and arguments on a particular issue.
             """)
-            
+    with gr.Row("compact"):
+        model_name=gr.Textbox(label="Model Name",placeholder="Enter Model Name")
+        base_url=gr.Textbox(label="Base URL",placeholder="Enter Base URL")
+        api_key=gr.Textbox(label="API Key",placeholder="Enter API Key",type="password")
+    add=gr.Button("+",variant="huggingface")    
     with gr.Row(equal_height=True):
             context=gr.Textbox(label="context",lines=3)
     with gr.Row():
-        model_quest=gr.Dropdown(label="Questioner Model",choices=["deepseek-chat","gemini-1.5-flash"])
-        model_answ=gr.Dropdown(label="Answerer Model",choices=["deepseek-chat","gemini-1.5-flash"])
+        model_quest=gr.Dropdown(label="Questioner Model",choices=list(model_base_url.keys()))
+        model_answ=gr.Dropdown(label="Answerer Model",choices=list(model_base_url.keys()))
         num_rounds=gr.Number(label="Number Rounds",minimum=1)
     with gr.Row():
         submit=gr.Button("Submit",variant="primary")
@@ -142,13 +152,18 @@ with gr.Blocks() as demo:
          chatbot=gr.Chatbot(
               type="messages",rtl=True
          )
+    with gr.Row():
+        save=gr.DownloadButton(label="Download Conversation",visible=False)
+    add.click(
+        add_model,
+        inputs=[model_name,base_url,api_key],
+        outputs=[model_quest,model_answ]
+    )   
     submit.click(
          user_input,
          inputs=[context,model_quest,model_answ,num_rounds,chatbot],
-         outputs=[chatbot])
-    with gr.Row():
-        save=gr.Button(value="Save Conversation",variant="huggingface")
-        save.click(save_conversation,inputs=chatbot)
+         outputs=[chatbot,save])
+    
 
     
 demo.launch()
